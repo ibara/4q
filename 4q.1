@@ -1,0 +1,87 @@
+.\"
+.\" 4q -- Forth to QBE compilation system
+.\"
+.\" Copyright (c) 2025 Brian Callahan <bcallah@openbsd.org>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd July 28, 2025
+.Dt 4Q 1
+.Os
+.Sh NAME
+.Nm 4q
+.Nd Forth to QBE compilation system
+.Sh SYNOPSIS
+.Nm
+.Op options
+.Ar file.4th ...
+.Sh DESCRIPTION
+.Nm
+is a utility that compiles a Forth-like language into native executables.
+.Nm
+offers a complete compilation system that preprocesses source code,
+compiles it into QBE intermediate representation,
+assembles,
+and links.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl E
+Halt after preprocessing.
+.It Fl O
+This option is accepted for compatibility with other compilation systems.
+The optimizer is always run during compilation.
+.It Fl Q
+Halt after generating QBE intermediate representation.
+.It Fl S
+Halt after generating assembly code.
+.It Fl c
+Halt after generating object code.
+.It Fl o Ar name
+Change the output file name to
+.Ar name .
+By default, a file named
+.Ar program.4th
+will generate a binary named
+.Ar program .
+.It Fl t Ar target
+Change the QBE target to
+.Ar target .
+Acceptable values for
+.Ar target
+are
+.Sy amd64_apple ,
+.Sy amd64_sysv ,
+.Sy arm64 ,
+.Sy arm64_apple ,
+and
+.Sy rv64 .
+By default,
+.Nm
+selects
+.Ar target
+based on the host system found at configure time.
+.It Fl v
+Turn on verbose compilation.
+.El
+.Sh EXIT STATUS
+The
+.Nm
+utility exits 0 on success, and >0 if an error occurs.
+.Sh AUTHORS
+.Nm
+was written by
+.An Brian Callahan Aq Mt bcallah@openbsd.org .
+.Sh CAVEATS
+This manual page is missing an explanation of the Forth-like language.
+That will be remedied soon.
