@@ -33,8 +33,8 @@ $ sudo make install
 
 Supported platforms
 -------------------
-* macOS on both arm64 and x86\_64
-* Linux (Ubuntu, others welcome) on x86\_64
+* macOS on arm64 and x86\_64
+* Linux (Debian and Ubuntu, others welcome) on aarch64 and x86\_64
 * [FreeBSD](https://freebsd.org/) on amd64
 
 LICENSE

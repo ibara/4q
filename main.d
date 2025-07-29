@@ -1431,8 +1431,8 @@ string one(string line) {
 
     string s;
 
-    // macOS needs a fixup pass for stdin, stdout, and stderr
-    if (os == system.darwin) {
+    // macOS and linux/arm64 need a fixup pass for stdin, stdout, and stderr
+    if (os == system.darwin || (os == system.linux && cpu == arch.arm64)) {
         s = fixup(line, real_stdin);
         if (s != line)
             return s;
@@ -1468,6 +1468,48 @@ string one(string line) {
 }
 
 string fixup(string line, string stream) {
+    import config;
+
+    switch (os) {
+    case system.darwin:
+        return darwin_fixup(line, stream);
+        break;
+    case system.linux:
+        return linux_fixup(line, stream);
+        break;
+    default:
+        return line;
+    }
+}
+
+string linux_fixup(string line, string stream) {
+    string full1 = ", " ~ stream;
+    string s1 = line.replace(full1, ", :got:" ~ stream);
+
+    if (s1 != line)
+        return s1;
+
+    string full2 = ", #:lo12:" ~ stream;
+    string s2 = line.replace(full2, ", :got_lo12:" ~ stream);
+
+    if (s2 == line)
+        return s1;
+
+    auto i = line.indexOf('x');
+    auto j = i;
+    while (line[j] != ',') {
+        if (j == line.length - 1)
+            return line;
+        ++j;
+    }
+
+    string reg = line[i .. j];
+    string s = "\tldr\t" ~ reg ~ ", [" ~ reg ~ ", :got_lo12:" ~ stream ~ "]";
+
+    return s;
+}
+
+string darwin_fixup(string line, string stream) {
     import config;
 
     switch (cpu) {

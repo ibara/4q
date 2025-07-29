@@ -456,7 +456,7 @@ case "x$cpu" in
     else
       if [ "x$os" = "xlinux" ] ; then
         emul="aarch64linux"
-        ldso="/lib64/ld-linux-aarch64.so.1"
+        ldso="/lib/ld-linux-aarch64.so.1"
         libdir="aarch64-linux-gnu"
       fi
       target="arm64"
@@ -469,7 +469,7 @@ case "x$cpu" in
     else
       if [ "x$os" = "xlinux" ] ; then
         emul="elf64lriscv"
-        ldso="/lib64/ld-linux-riscv64-lp64d.so.1"
+        ldso="/lib/ld-linux-riscv64-lp64d.so.1"
         libdir="riscv64-linux-gnu"
       fi
       target="rv64"
