@@ -47,7 +47,7 @@ EOF
 }
 
 ascheck() {
-  for assembler in "$AS" as ; do
+  for assembler in "$AS" as "$cc -c" ; do
 cat << EOF > conftest.s
 	ret
 EOF
@@ -82,14 +82,18 @@ EOF
 }
 
 cppcheck() {
-  for preprocessor in "$PREPROCESSOR" cpp ; do
+  for preprocessor in "$PREPROCESSOR" cpp "$cc -E" ; do
 cat << EOF > conftest.c
 #include "conftest.h"
 EOF
 cat << EOF > conftest.h
 int main(void){return 0;}
 EOF
-    $preprocessor conftest.c conftest.i > /dev/null 2>&1
+    if [ "x$preprocessor" = "x$cc -E" ] ; then
+      $preprocessor conftest.c -o conftest.i > /dev/null 2>&1
+    else
+      $preprocessor conftest.c conftest.i > /dev/null 2>&1
+    fi
     status=$?
     rm -f conftest.i conftest.h conftest.c
     if [ $status -eq 0 ] ; then
@@ -208,6 +212,11 @@ EOF
   if [ "x$os" = "xlinux" ] ; then
 cat << EOF >> config.d
 string[] ld_args = ["-z", "relro", "--hash-style=gnu", "--build-id", "--eh-frame-hdr", "-m", "$emul", "-pie", "-dynamic-linker", "$ldso", "-o", "/lib/$libdir/Scrt1.o", "/lib/$libdir/crti.o", "/usr/lib/gcc/$libdir/$gcc_major/crtbeginS.o", "-L/lib/$libdir", "-L/lib64", "-L/usr/lib64", "-L/usr/lib/gcc/$libdir/$gcc_major", "-lgcc", "-lc", "-lgcc", "/usr/lib/gcc/$libdir/$gcc_major/crtendS.o", "/lib/$libdir/crtn.o"];
+EOF
+  fi
+  if [ "x$os" = "xfreebsd" ] ; then
+cat << EOF >> config.d
+string[] ld_args = ["--eh-frame-hdr", "-dynamic-linker", "/libexec/ld-elf.so.1", "--hash-style=both", "--enable-new-dtags", "-o", "/usr/lib/crt1.o", "/usr/lib/crti.o", "/usr/lib/crtbegin.o", "-L/usr/lib", "-lgcc", "-lc", "-lgcc", "/usr/lib/crtend.o", "/usr/lib/crtn.o"];
 EOF
   fi
   linker="$ld"
@@ -526,6 +535,9 @@ echo "$qbe"
 
 printf "checking for assembler... "
 ascheck
+if [ "x$assembler" = "x$cc -c" ] ; then
+  assembler="$cc"
+fi
 echo "$assembler"
 
 printf "checking for linker... "
@@ -597,16 +609,32 @@ if [ ! -z "$dflags" ] ; then
   dflags="${dflags## }"
 fi
 
+eflag="false"
+if [ "x$preprocessor" = "x$cc -E" ] ; then
+  preprocessor="$cc"
+  eflag="true"
+fi
+
+cflag="false"
+if [ "x$assembler" = "x$cc" ] ; then
+  cflag="true"
+fi
+
 cat << EOF >> config.d
 
 string default_target = "$target";
 
 string preprocessor = "$preprocessor";
+bool need_Eflag = $eflag;
+
 string qbe = "$qbe";
 EOF
 
 cat << EOF >> config.d
+
 string assembler = "$assembler";
+bool need_cflag = $cflag;
+
 string linker = "$linker";
 
 int cpu = arch.$arch;

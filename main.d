@@ -802,8 +802,8 @@ bool compile(Forth forth, string line) {
                 uint c = to!uint(dstr[i]);
                 str ~= ("w " ~ to!string(c) ~ ", ");
             }
-            forth.global("\nexport data $.L.str" ~ strno ~ " = align 4 { " ~ str ~ "w 0 }");
-            forth.cg("\tcall $.string(l $.L.str" ~ strno ~ ")");
+            forth.global("\nexport data $_.L.str" ~ strno ~ " = align 4 { " ~ str ~ "w 0 }");
+            forth.cg("\tcall $.string(l $_.L.str" ~ strno ~ ")");
             forth.inc_strno;
             is_string = false;
             continue;
@@ -1163,9 +1163,16 @@ int main(string[] args) {
 
         string[] pp;
         pp ~= preprocessor;
+        if (need_Eflag) {
+            pp ~= "-E";
+            pp ~= "-x";
+            pp ~= "c";
+        }
         if (forth.vflag)
             pp ~= "-v";
         pp ~= input;
+        if (need_Eflag)
+            pp ~= "-o";
         pp ~= (base ~ ".i");
 
         if (forth.vflag) {
@@ -1269,6 +1276,8 @@ int main(string[] args) {
 
             string[] as;
             as ~= assembler;
+            if (need_cflag)
+                as ~= "-c";
             if (forth.vflag)
                 as ~= "-v";
             as ~= "-o";
@@ -1363,7 +1372,15 @@ string[] create_linker_invocation(Forth forth) {
             ld ~= ld_args[i];
         break;
     case system.freebsd:
-        stderr.writeln(forth.argv0 ~ ": error: FreeBSD linking not yet implemented");
+        for (int i = 0; i < 6; ++i)
+            ld ~= ld_args[i];
+        ld ~= forth.outfile;
+        for (int i = 6; i < 10; ++i)
+            ld ~= ld_args[i];
+        foreach (input; forth.inputs)
+            ld ~= (create_base(input) ~ ".o");
+        for (int i = 10; i < 15; ++i)
+            ld ~= ld_args[i];
     }
 
     return ld;
