@@ -640,6 +640,8 @@ string linker = "$linker";
 int cpu = arch.$arch;
 int os = system.$os;
 
+ulong rvpcrel;
+
 string real_stdin = "$stdin";
 string real_stdout = "$stdout";
 string real_stderr = "$stderr";

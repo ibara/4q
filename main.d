@@ -1456,7 +1456,7 @@ string one(string line) {
     string s;
 
     // macOS and linux need a fixup pass for stdin, stdout, and stderr
-    if (os == system.darwin || (os == system.linux && cpu == arch.arm64)) {
+    if (os == system.darwin || os == system.linux) {
         s = fixup(line, real_stdin);
         if (s != line)
             return s;
@@ -1536,18 +1536,23 @@ string linux_fixup(string line, string stream) {
 
         return s;
     case arch.rv64:
-        string s = line.replace(", stderr", ", stderr-match");
+        string s = line.replace(", " ~ stream, ", %got_pcrel_hi(" ~ stream ~ ")");
 
         if (s == line)
             return line;
 
-        auto i = line.lastIndexOf('.');
+        auto i = line.lastIndexOf(',');
         if (i < 2)
             return line;
 
         string reg = line[i - 2 .. i];
 
-        s = "\tla " ~ reg ~ ", stderr\n\tld " ~ reg ~ ", 0(" ~ reg ~ ")";
+        s = ".Lpcrel_hi" ~ to!string(rvpcrel) ~ ":\n";
+        s ~= "\tauipc " ~ reg ~ ", %got_pcrel_hi(" ~ stream ~ ")\n";
+        s ~= "\tld " ~ reg ~ ", %pcrel_lo(.Lpcrel_hi" ~ to!string(rvpcrel) ~ ")(" ~ reg ~ ")\n";
+        s ~= "\tld " ~ reg ~ ", 0(" ~ reg ~ ")";
+
+        ++rvpcrel;
 
         return s;
     default:
