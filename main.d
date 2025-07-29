@@ -145,6 +145,7 @@ class Forth {
 
         foreach (g; this.globals)
             s ~= g;
+        s ~= "\n";
 
         std.file.write(fn, s);
     }
@@ -1173,7 +1174,10 @@ int main(string[] args) {
         pp ~= input;
         if (need_Eflag)
             pp ~= "-o";
-        pp ~= (base ~ ".i");
+        if (forth.Eflag && !forth.outfile.empty)
+            pp ~= forth.outfile;
+        else
+            pp ~= (base ~ ".i");
 
         if (forth.vflag) {
             bool first_s = true;
@@ -1206,8 +1210,12 @@ int main(string[] args) {
             return 1;
         }
 
-        if (forth.vflag)
-            stderr.writeln(forth.argv0 ~ " -o " ~ (base ~ ".ssa") ~ " " ~ (base ~ ".i"));
+        if (forth.vflag) {
+            if (forth.Qflag && !forth.outfile.empty)
+                stderr.writeln(forth.argv0 ~ " -o " ~ forth.outfile ~ " " ~ (base ~ ".i"));
+            else
+                stderr.writeln(forth.argv0 ~ " -o " ~ (base ~ ".ssa") ~ " " ~ (base ~ ".i"));
+        }
 
         forth.set_pass(pass.collect);
 
@@ -1229,7 +1237,10 @@ int main(string[] args) {
             forth.fatal("unterminated function");
 
         if (!forth.have_errors) {
-            forth.write_code(base ~ ".ssa");
+            if (forth.Qflag && !forth.outfile.empty)
+                forth.write_code(forth.outfile);
+            else
+                forth.write_code(base ~ ".ssa");
 
             if (forth.Qflag) {
                 remove_all(forth, base, rm.i);
@@ -1263,8 +1274,12 @@ int main(string[] args) {
                 return 1;
             }
 
-            if (forth.vflag)
-                stderr.writeln("opt -o " ~ (base ~ ".s") ~ " " ~ (base ~ ".qbe"));
+            if (forth.vflag) {
+                if (forth.Sflag && !forth.outfile.empty)
+                    stderr.writeln("opt -o " ~ forth.outfile ~ " " ~ (base ~ ".qbe"));
+                else
+                    stderr.writeln("opt -o " ~ (base ~ ".s") ~ " " ~ (base ~ ".qbe"));
+            }
 
             if (!O(forth, base))
                 return 1;
@@ -1281,7 +1296,10 @@ int main(string[] args) {
             if (forth.vflag)
                 as ~= "-v";
             as ~= "-o";
-            as ~= (base ~ ".o");
+            if (forth.cflag && !forth.outfile.empty)
+                as ~= forth.outfile;
+            else
+                as ~= (base ~ ".o");
             as ~= (base ~ ".s");
 
             if (forth.vflag) {
@@ -1341,19 +1359,22 @@ string[] create_linker_invocation(Forth forth) {
     import config;
 
     string[] ld;
+    string outfile;
 
     ld ~= linker;
     if (forth.vflag)
         ld ~= "-v";
 
     if (forth.outfile.empty)
-        forth.outfile = create_base(forth.inputs[0]);
+        outfile = create_base(forth.inputs[0]);
+    else
+        outfile = forth.outfile;
 
     final switch (os) {
     case system.darwin:
         for (int i = 0; i < 15; ++i)
             ld ~= ld_args[i];
-        ld ~= forth.outfile;
+        ld ~= outfile;
         ld ~= ld_args[15];
         foreach (input; forth.inputs)
             ld ~= (create_base(input) ~ ".o");
@@ -1363,7 +1384,7 @@ string[] create_linker_invocation(Forth forth) {
     case system.linux:
         for (int i = 0; i < 11; ++i)
             ld ~= ld_args[i];
-        ld ~= forth.outfile;
+        ld ~= outfile;
         for (int i = 11; i < 18; ++i)
             ld ~= ld_args[i];
         foreach (input; forth.inputs)
@@ -1374,7 +1395,7 @@ string[] create_linker_invocation(Forth forth) {
     case system.freebsd:
         for (int i = 0; i < 6; ++i)
             ld ~= ld_args[i];
-        ld ~= forth.outfile;
+        ld ~= outfile;
         for (int i = 6; i < 10; ++i)
             ld ~= ld_args[i];
         foreach (input; forth.inputs)
@@ -1421,7 +1442,10 @@ bool O(Forth forth, string base) {
         --counter;
     }
 
-    std.file.write(base ~ ".s", output);
+    if (forth.Sflag && !forth.outfile.empty)
+        std.file.write(forth.outfile, output);
+    else
+        std.file.write(base ~ ".s", output);
 
     return true;
 }
@@ -1431,7 +1455,7 @@ string one(string line) {
 
     string s;
 
-    // macOS and linux/arm64 need a fixup pass for stdin, stdout, and stderr
+    // macOS and linux need a fixup pass for stdin, stdout, and stderr
     if (os == system.darwin || (os == system.linux && cpu == arch.arm64)) {
         s = fixup(line, real_stdin);
         if (s != line)
@@ -1483,30 +1507,52 @@ string fixup(string line, string stream) {
 }
 
 string linux_fixup(string line, string stream) {
-    string full1 = ", " ~ stream;
-    string s1 = line.replace(full1, ", :got:" ~ stream);
+    import config;
 
-    if (s1 != line)
-        return s1;
+    switch (cpu) {
+    case arch.arm64:
+        string full1 = ", " ~ stream;
+        string s1 = line.replace(full1, ", :got:" ~ stream);
 
-    string full2 = ", #:lo12:" ~ stream;
-    string s2 = line.replace(full2, ", :got_lo12:" ~ stream);
+        if (s1 != line)
+            return s1;
 
-    if (s2 == line)
-        return s1;
+        string full2 = ", #:lo12:" ~ stream;
+        string s2 = line.replace(full2, ", :got_lo12:" ~ stream);
 
-    auto i = line.indexOf('x');
-    auto j = i;
-    while (line[j] != ',') {
-        if (j == line.length - 1)
+        if (s2 == line)
+            return s1;
+
+        auto i = line.indexOf('x');
+        auto j = i;
+        while (line[j] != ',') {
+            if (j == line.length - 1)
+                return line;
+            ++j;
+        }
+
+        string reg = line[i .. j];
+        string s = "\tldr\t" ~ reg ~ ", [" ~ reg ~ ", :got_lo12:" ~ stream ~ "]";
+
+        return s;
+    case arch.rv64:
+        string s = line.replace(", stderr", ", stderr-match");
+
+        if (s == line)
             return line;
-        ++j;
+
+        auto i = line.lastIndexOf('.');
+        if (i < 2)
+            return line;
+
+        string reg = line[i - 2 .. i];
+
+        s = "\tla " ~ reg ~ ", stderr\n\tld " ~ reg ~ ", 0(" ~ reg ~ ")";
+
+        return s;
+    default:
+        return line;
     }
-
-    string reg = line[i .. j];
-    string s = "\tldr\t" ~ reg ~ ", [" ~ reg ~ ", :got_lo12:" ~ stream ~ "]";
-
-    return s;
 }
 
 string darwin_fixup(string line, string stream) {
