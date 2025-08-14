@@ -238,7 +238,7 @@ class Forth {
 
         if (func == "main") {
             this.cg("export function w $main(w %argc, l %argv) {\n@start\n@begin");
-            this.cg("\tcall $.init()");
+            this.cg("\tcall $.init(w %argc, l %argv)");
         } else {
             this.cg("export function $.4q." ~ this.current_function ~ "() {\n@start\n@begin");
         }
@@ -1088,21 +1088,23 @@ int main(string[] args) {
             continue;
         }
 
+        /+
+         + -O0 = disable optimizations
+         + -O1 = turn on peephole optimizer
+         + -O2 = -O1 plus turn on optimized assembly routines
+         +
+         + -O == -O1
+         + -O<anything else> == -O2
+         +/
+        if (arg.startsWith("-O")) {
+            forth.set_Oflag(arg);
+            continue;
+        }
+
         if (arg[0] == '-') {
             switch (arg) {
             case "-E":
                 forth.set_Eflag();
-                break;
-            case "-O":
-                /+
-                 + -O0 = disable optimizations
-                 + -O1 = turn on peephole optimizer
-                 + -O2 = also turn on optimized assembly routines
-                 +
-                 + -O == -O1
-                 + -O<anything else> == -O2
-                 +/
-                forth.set_Oflag(arg);
                 break;
             case "-Q":
                 forth.set_Qflag();

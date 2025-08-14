@@ -34,7 +34,7 @@ fi
 
 cat << EOF >> Makefile
 	touch lib\${PROG}.4th
-	./\${PROG} -gen_lib lib\${PROG}.4th
+	./\${PROG} -O2 -gen_lib lib\${PROG}.4th
 	rm -f lib\${PROG}.4th
 
 install:
@@ -717,13 +717,25 @@ string real_stdin = "$stdin";
 string real_stdout = "$stdout";
 string real_stderr = "$stderr";
 
-string init_init = "export function $.init() {
+string init_init = "export function $.init(w %argc, l %argv) {
 @start
 	%.0 =l call \$setlocale(w $lcall, l \$.str.locale)
 	%size =l shl 1, 10
 	storel %size, $.sz
 	%stack =l call $.xmalloc(l %size)
 	storel %stack, $.stack
+	%.0 =l extsw %argc
+	%ac =l extsw %argc
+	call $.push(l 0)
+@loop
+	%ac =l sub %ac, 1
+	%offset =l shl %ac, 3
+	%addr =l add %argv, %offset
+	call $.push(l %addr)
+	%cmp =l ceql %ac, 0
+	jnz %cmp, @done, @loop
+@done
+	call $.push(l %.0)
 	ret
 }\n";
 
