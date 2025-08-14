@@ -1,0 +1,6 @@
+Makefile
+config.d
+lib4q.a
+4q
+*.core
+*.o

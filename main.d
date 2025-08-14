@@ -1418,7 +1418,10 @@ int main(string[] args) {
             if (forth.genlib) {
                 string[] ar_cmd;
                 ar_cmd ~= ar;
-                ar_cmd ~= "cqD";
+                if (os == system.darwin)
+                    ar_cmd ~= "cq";
+                else
+                    ar_cmd ~= "cqD";
                 ar_cmd ~= "lib4q.a";
                 ar_cmd ~= (base ~ ".o");
 
