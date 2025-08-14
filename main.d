@@ -66,7 +66,7 @@ class Forth {
     private int p;
     private bool error, next_is_name;
     string outfile;
-    bool in_func, in_qbe;
+    bool in_func;
 
     this(string s, Dictionary[] dict) {
         auto i = lastIndexOf(s, '/') + 1;
@@ -156,7 +156,7 @@ class Forth {
         if (this.have_errors)
             return;
 
-        if (!this.in_func && !this.in_qbe) {
+        if (!this.in_func) {
             this.fatal("code found outside word");
             return;
         }
@@ -164,17 +164,8 @@ class Forth {
         while (this.dictionary[i].name != this.current_function) {
             ++i;
             if (i == this.dictionary.length) {
-                if (this.in_qbe) {
-                    // Search the list again looking for the dot_qbe word
-                    i = 0;
-                    while (this.dictionary[i].name != ".qbe")
-                        ++i;
-                } else {
-                    this.fatal("word \"" ~ this.current_function ~ "\" not found in dictionary");
-                    return;
-                }
-
-                break;
+                this.fatal("word \"" ~ this.current_function ~ "\" not found in dictionary");
+                return;
             }
         }
 
@@ -197,7 +188,7 @@ class Forth {
             this.cg("export function w $main(w %argc, l %argv) {\n@start\n@begin");
             this.cg("\tcall $.init()");
         } else {
-            this.cg("export function $" ~ this.current_function ~ "() {\n@start\n@begin");
+            this.cg("export function $.4q." ~ this.current_function ~ "() {\n@start\n@begin");
         }
         this.next_is_name = false;
     }
@@ -237,10 +228,6 @@ class Forth {
 
     void fatal_string() {
         this.fatal("unterminated string");
-    }
-
-    void fatal_qbe() {
-        this.fatal("missing qbe ir");
     }
 
     void fatal_colon() {
@@ -343,7 +330,8 @@ class Forth {
         } else {
             this.cg("@.if." ~ no);
             this.cg("\t%.0 =l call $.pop()");
-            this.cg("\tjnz %.0, @.body." ~ no ~ ", @.else." ~ no);
+            this.cg("\t%.1 =l ceql %.0, 0");
+            this.cg("\tjnz %.1, @.else." ~ no ~ ", @.body." ~ no);
             this.cg("@.body." ~ no);
         }
     }
@@ -396,7 +384,8 @@ class Forth {
             this.cg("@.loop." ~ no);
         } else if (type == block_type.begin_until) {
             this.cg("\t%.0 =l call $.pop()");
-            this.cg("\tjnz %.0, @.until." ~ no ~ ", @.begin." ~ no);
+            this.cg("\t%.1 =l ceql %.0, 0");
+            this.cg("\tjnz %.1, @.begin." ~ no ~ ", @.until." ~ no);
             this.cg("@.until." ~ no);
         } else {
             if (!this.blocks[$ - 1].have_else)
@@ -491,7 +480,7 @@ string[] tokenize(Forth forth, string line) {
     string[] tokens;
     string token;
     ulong hash_counter, i, j;
-    bool is_hash, is_qbe;
+    bool is_hash;
 
     forth.next;
 
@@ -544,52 +533,6 @@ string[] tokenize(Forth forth, string line) {
 
                 continue;
             }
-        }
-
-        if (is_qbe) {
-            while (isWhite(line[i])) {
-                ++i;
-                if (i == line.length) {
-                    forth.fatal_qbe;
-                    return tokens;
-                }
-            }
-
-            j = i;
-            ulong qbe_start = i;
-
-            while (!isWhite(line[i])) {
-                ++i;
-                if (i == line.length)
-                    break;
-            }
-
-            token = line[j .. i];
-            if (token == "notab") {
-                tokens ~= token;
-
-                if (i == line.length) {
-                    tokens ~= "";
-                    return tokens;
-                }
-
-                while (isWhite(line[i])) {
-                    ++i;
-                    if (i == line.length) {
-                        tokens ~= "";
-                        return tokens;
-                    }
-                }
-
-                j = i;
-            } else {
-                j = qbe_start;
-            }
-
-            token = line[j .. $];
-            tokens ~= token;
-
-            return tokens;
         }
 
         j = i;
@@ -652,10 +595,6 @@ string[] tokenize(Forth forth, string line) {
         // Hash, special case, similar to strings
         if (token == "#")
             is_hash = true;
-
-        // Direct entry of qbe ir, like a string
-        if (token == "qbe")
-            is_qbe = true;
 
         tokens ~= token;
     }
@@ -810,22 +749,6 @@ bool compile(Forth forth, string line) {
             continue;
         }
 
-        if (forth.in_qbe) {
-            if (token == "notab") {
-                have_notab = true;
-                continue;
-            }
-
-            if (!have_notab)
-                forth.cg("\t" ~ token);
-            else
-                forth.cg(token);
-
-            forth.in_qbe = false;
-            have_notab = false;
-            continue;
-        }
-
         if (isNumeric(token)) {
             forth.cg("\tcall $.push(l " ~ token ~ ")");
             continue;
@@ -919,6 +842,9 @@ bool compile(Forth forth, string line) {
         case ".\"":
             is_string = true;
             break;
+        case "dup":
+            forth.cg("\tcall $dup()");
+            break;
         case "cr":
             forth.cg("\tcall $cr()");
             break;
@@ -933,6 +859,21 @@ bool compile(Forth forth, string line) {
             break;
         case "xor":
             forth.cg("\tcall $xor()");
+            break;
+        case "emit":
+            forth.cg("\tcall $emit()");
+            break;
+        case "swap":
+            forth.cg("\tcall $swap()");
+            break;
+        case "drop":
+            forth.cg("\tcall $drop()");
+            break;
+        case "over":
+            forth.cg("\tcall $over()");
+            break;
+        case "rot":
+            forth.cg("\tcall $rot()");
             break;
         case "if":
             forth.create_block(block_type.if_then);
@@ -958,9 +899,6 @@ bool compile(Forth forth, string line) {
         case "variable":
             is_variable = true;
             break;
-        case "qbe":
-            forth.in_qbe = true;
-            break;
         default:
             if (token == "i") {
                 if (forth.loop_i == true)
@@ -973,7 +911,7 @@ bool compile(Forth forth, string line) {
                 is_variable = false;
             } else {
                 if (word.type == word_type.func)
-                    forth.cg("\tcall $" ~ word.name ~ "()");
+                    forth.cg("\tcall $.4q." ~ word.name ~ "()");
                 else
                     forth.cg("\tcall $.push(l $" ~ word.name ~ ")");
             }
@@ -985,9 +923,6 @@ bool compile(Forth forth, string line) {
 
     if (is_string)
         forth.fatal_string;
-
-    if (forth.in_qbe)
-        forth.fatal_qbe;
 
     return forth.in_func;
 }
@@ -1041,7 +976,7 @@ int main(string[] args) {
     dict ~= fatal;
     dict ~= init;
     dict ~= writestderr;
-    dict ~= dot_qbe;
+    dict ~= resize;
 
     Forth forth = new Forth(args[0], dict);
 
@@ -1162,8 +1097,14 @@ int main(string[] args) {
 
         string base = create_base(input);
 
+        /+
+         + -C is to retain comments, otherwise a word
+         + named "/*" or "//" would get removed.
+         + Both clang and GNU cpp understand this flag.
+         +/
         string[] pp;
         pp ~= preprocessor;
+        pp ~= "-C";
         if (need_Eflag) {
             pp ~= "-E";
             pp ~= "-x";
@@ -1372,6 +1313,7 @@ string[] create_linker_invocation(Forth forth) {
 
     final switch (os) {
     case system.darwin:
+        ld ~= "-dead_strip";
         for (int i = 0; i < 15; ++i)
             ld ~= ld_args[i];
         ld ~= outfile;
@@ -1382,6 +1324,7 @@ string[] create_linker_invocation(Forth forth) {
         ld ~= ld_args[17];
         break;
     case system.linux:
+        ld ~= "--gc-sections";
         for (int i = 0; i < 11; ++i)
             ld ~= ld_args[i];
         ld ~= outfile;
@@ -1393,6 +1336,7 @@ string[] create_linker_invocation(Forth forth) {
             ld ~= ld_args[i];
         break;
     case system.freebsd:
+        ld ~= "--gc-sections";
         for (int i = 0; i < 6; ++i)
             ld ~= ld_args[i];
         ld ~= outfile;
@@ -1429,10 +1373,28 @@ bool O(Forth forth, string base) {
             continue;
         }
 
-        output ~= one(peephole[0]) ~ "\n";
-        peephole[0] = peephole[1];
-        peephole[1] = peephole[2];
-        --counter;
+        if (ffunction_sections(peephole[0])) {
+            output ~= peephole[0] ~ "\n";
+            output ~= ".section .text.";
+            if (peephole[1].startsWith(".globl ")) {
+                output ~= peephole[2][0 .. $ - 1];
+                output ~= ",\"ax\",@progbits\n";
+                output ~= peephole[1] ~ "\n";
+                output ~= peephole[2] ~ "\n";
+                counter -= 3;
+            } else {
+                output ~= peephole[1][0 .. $ - 1];
+                output ~= ",\"ax\",@progbits\n";
+                output ~= peephole[1] ~ "\n";
+                peephole[0] = peephole[2];
+                counter -= 2;
+            }
+        } else {
+            output ~= one(peephole[0]) ~ "\n";
+            peephole[0] = peephole[1];
+            peephole[1] = peephole[2];
+            --counter;
+        }
     }
 
     while (counter > 0) {
@@ -1448,6 +1410,21 @@ bool O(Forth forth, string base) {
         std.file.write(base ~ ".s", output);
 
     return true;
+}
+
+bool ffunction_sections(string line) {
+    import config;
+
+    /+
+     + Implement -ffunction-sections for qbe on ELF platforms
+     + macOS doesn't need it; the linker does it with -dead_strip
+     +/
+    if (!(os == system.darwin)) {
+        if (line == ".text")
+            return true;
+    }
+
+    return false;
 }
 
 string one(string line) {
@@ -1479,11 +1456,19 @@ string one(string line) {
         if (s != line)
             return s;
 
+        s = decq(line);
+        if (s != line)
+            return s;
+
         s = xorq(line);
         if (s != line)
             return s;
 
         s = incl(line);
+        if (s != line)
+            return s;
+
+        s = decl(line);
         if (s != line)
             return s;
     }
@@ -1633,6 +1618,36 @@ string incq(string line) {
     } else {
         string reg = line[match.length - 2 .. $];
         s ~= "\tincq " ~ reg;
+    }
+
+    return s;
+}
+
+string decl(string line) {
+    string s;
+
+    string match = "\tsubl $1, %";
+    bool does = line.startsWith(match);
+    if (does == false) {
+        return line;
+    } else {
+        string reg = line[match.length - 1 .. $];
+        s ~= "\tdecl " ~ reg;
+    }
+
+    return s;
+}
+
+string decq(string line) {
+    string s;
+
+    string match = "\tsubq $1, %r";
+    bool does = line.startsWith(match);
+    if (does == false) {
+        return line;
+    } else {
+        string reg = line[match.length - 2 .. $];
+        s ~= "\tdecq " ~ reg;
     }
 
     return s;
@@ -1889,7 +1904,8 @@ Dictionary pop = Dictionary(".pop",
 "function l $.pop() {
 @start
 	%sp =l loadl $.sp
-	jnz %sp, @valid, @error
+	%cmp =l ceql %sp, 0
+	jnz %cmp, @error, @valid
 @error
 	call $.fatal(l $.str.underflow)
 @valid
@@ -1902,6 +1918,19 @@ Dictionary pop = Dictionary(".pop",
 	ret %value
 }\n", word_type.func);
 
+Dictionary resize = Dictionary(".resize",
+"function $.resize(l %sz) {
+@start
+	%newsz =l shl %sz, 1
+	storel %newsz, $.sz
+	%pointer =l call $.xmalloc(l %newsz)
+	%stack =l loadl $.stack
+	%.0 =l call $memcpy(l %pointer, l %stack, l %sz)
+	call $free(l %stack)
+	storel %pointer, $.stack
+	ret
+}\n", word_type.func);
+
 Dictionary push = Dictionary(".push",
 "function $.push(l %num) {
 @start
@@ -1911,14 +1940,7 @@ Dictionary push = Dictionary(".push",
 	%cmp =l ceql %offset, %sz
 	jnz %cmp, @resize, @end
 @resize
-	%newsz =l shl %sz, 1
-	storel %newsz, $.sz
-	%pointer =l call $.xmalloc(l %newsz)
-	%stack =l loadl $.stack
-	%.0 =l call $memcpy(l %pointer, l %stack, l %sz)
-	call $free(l %stack)
-	storel %pointer, $.stack
-	jmp @end
+	call $.resize(l %sz)
 @end
 	%stack =l loadl $.stack
 	%addr =l add %stack, %offset
@@ -1931,11 +1953,13 @@ Dictionary push = Dictionary(".push",
 Dictionary xmalloc = Dictionary(".xmalloc",
 "function l $.xmalloc(l %num) {
 @start
-	jnz %num, @valid, @error
+	%.0 =l ceql %num, 0
+	jnz %.0, @error, @valid
 @valid
 	%size =l shl %num, 3
 	%pointer =l call $malloc(l %size)
-	jnz %pointer, @success, @error
+	%.0 =l ceql %pointer, 0
+	jnz %.0, @error, @success
 @error
 	call $.fatal(l $.str.xmalloc)
 @success
@@ -2034,5 +2058,3 @@ Dictionary addbang = Dictionary("+!",
 	storel %.value, %.location
 	ret
 }\n", word_type.func);
-
-Dictionary dot_qbe = Dictionary(".qbe", "", word_type.func);
