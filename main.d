@@ -68,7 +68,7 @@ class Forth {
     private int p;
     private bool error, next_is_name;
     string last_data, last_func, outfile;
-    bool in_func;
+    bool in_func, please_hand_opt;
 
     this(string s, Dictionary[] dict) {
         auto i = lastIndexOf(s, '/') + 1;
@@ -168,6 +168,64 @@ class Forth {
         this.user_globals ~= s;
     }
 
+    string hand_opt(string s) {
+        import config;
+        import opt;
+
+        if (this.Oflag != 2)
+            return s;
+
+        if (cpu != arch.x64)
+            return s;
+
+        Opt optim = new Opt;
+
+        final switch (os) {
+        case system.linux:
+        case system.freebsd:
+            switch (s) {
+            case ".push":
+                return optim.push_opt_elf;
+            case ".pop":
+                return optim.pop_opt_elf;
+            default:
+                return s;
+            }
+            break;
+        case system.darwin:
+            switch (s) {
+            case ".push":
+                return optim.push_opt_macho;
+            case ".pop":
+                return optim.pop_opt_macho;
+            default:
+                return s;
+            }
+        }
+    }
+
+    string code(Dictionary d) {
+        import config;
+
+        if (this.Oflag != 2)
+            return d.code;
+
+        if (cpu != arch.x64)
+            return d.code;
+
+        if (os == system.darwin)
+            return d.code;
+
+        switch (d.name) {
+        case ".push":
+        case ".pop":
+            please_hand_opt = true;
+            return "\n";
+        default:
+            return d.code;
+        }
+    }
+
     void write_code(string fn) {
         string s;
         bool print;
@@ -184,7 +242,7 @@ class Forth {
 
                 if (print) {
                     if (d.code != "\n")
-                        s ~= d.code;
+                        s ~= code(d);
                 }
             } else {
                 s ~= "export data $" ~ d.name ~ " = align 8 { z 8 }\n";
@@ -1084,6 +1142,28 @@ int main(string[] args) {
                 return 1;
             }
             target = arg;
+            switch (target) {
+            case "amd64_sysv":
+                cpu = arch.x64;
+                break;
+            case "amd64_apple":
+                cpu = arch.x64;
+                os = system.darwin;
+                break;
+            case "arm64":
+                cpu = arch.arm64;
+                break;
+            case "arm64_apple":
+                cpu = arch.arm64;
+                os = system.darwin;
+                break;
+            case "rv64":
+                cpu = arch.rv64;
+                break;
+            default:
+                cpu = arch.arm64;
+                os = system.darwin;
+            }
             set_target = false;
             continue;
         }
@@ -1483,6 +1563,11 @@ bool O(Forth forth, string base) {
     string output;
     uint i;
     int counter;
+
+    if (forth.please_hand_opt) {
+        output ~= forth.hand_opt(".push");
+        output ~= forth.hand_opt(".pop");
+    }
 
     string[] lines;
     try {
