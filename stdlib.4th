@@ -1,9 +1,12 @@
 #ifndef _STDLIB_4TH_
 #define _STDLIB_4TH_
 
+( Arithmetic functions )
 : dec 1 - ;
 : inc 1 + ;
-: write begin dup dup 0 <> if emit then 0 = until drop ;
-: writeln write cr ;
+
+( Printing strings )
+: print begin dup dup 0 <> if emit then 0 = until drop ;
+: println print cr ;
 
 #endif

@@ -46,6 +46,20 @@ distclean: clean
 EOF
 }
 
+die() {
+  printf "%s\n" "$1"
+  exit 1
+}
+
+archeck() {
+  command -v ar > /dev/null 2>&1
+  if [ $? -ne 0 ] ; then
+    echo "not found"
+    die "Missing ar utility"
+  fi
+  ar="ar"
+}
+
 ascheck() {
   for assembler in "$AS" as "$cc -c" ; do
 cat << EOF > conftest.s
@@ -59,8 +73,7 @@ EOF
     fi
   done
   echo "not found"
-  echo "error: Could not find a working assembler"
-  exit 1
+  die "error: Could not find a working assembler"
 }
 
 cccheck() {
@@ -77,8 +90,7 @@ EOF
     fi
   done
   echo "not found"
-  echo "error: Could not find a working C compiler"
-  exit 1
+  die "error: Could not find a working C compiler"
 }
 
 cppcheck() {
@@ -101,8 +113,7 @@ EOF
     fi
   done
   echo "not found"
-  echo "error: Could not find a working C preprocessor"
-  exit 1
+  die "error: Could not find a working C preprocessor"
 }
 
 dmdcheck() {
@@ -244,8 +255,16 @@ EOF
     rm -f conftest.ssa
   done
   echo "not found"
-  echo "error: Could not find a working QBE"
-  exit 1
+  die "error: Could not find a working QBE"
+}
+
+ranlibcheck() {
+  command -v ranlib > /dev/null 2>&1
+  if [ $? -ne 0 ] ; then
+    echo "not found"
+    die "Missing ranlib utility"
+  fi
+  ranlib="ranlib"
 }
 
 stderrcheck() {
@@ -388,6 +407,12 @@ do
     --ld=*)
       LD=${opt#*=}
       ;;
+    --ar=*)
+      AR=${opt#*=}
+      ;;
+    --ranlib=*)
+      RANLIB=${opt#*=}
+      ;;
     --help|-h)
       echo "Usage: configure [options]"
       echo ""
@@ -410,7 +435,10 @@ do
       echo "Use specified assembler [default=as]"
       printf "  --ld=LD                 "
       echo "Use specified linker [default=ld]"
-      exit 1
+      printf "  --ar=AR                 "
+      echo "Use specified archiver [default=ar]"
+      printf "  --ranlib=RANLIB         "
+      die "Use specified ranlib [default=ranlib]"
       ;;
     *)
       ;;
@@ -425,8 +453,7 @@ printf "checking for D compiler... "
 dmdcheck
 if [ $? -ne 0 ] ; then
   echo "not found"
-  echo "error: Please install a D compiler and re-run configure"
-  exit 1
+  die "error: Please install a D compiler and re-run configure"
 else
   echo "$dmd"
 fi
@@ -509,8 +536,7 @@ if [ "x$os" = "xdarwin" ] ; then
   xcode="$(xcode-select -p)"
   if [ $? -ne 0 ] ; then
     echo "not found"
-    echo "error: You must have Xcode tools installed"
-    exit 1
+    die "error: You must have Xcode tools installed"
   fi
   echo "$xcode"
   clang_ver=$($xcode/usr/bin/clang -dumpversion | awk '{split($0, array, "."); print array[1]}')
@@ -548,6 +574,14 @@ else
 fi
 ldcheck "$ld"
 echo "$linker"
+
+printf "checking for ar... "
+archeck
+echo "$ar"
+
+printf "checking for ranlib... "
+ranlibcheck
+echo "$ranlib"
 
 printf "checking for real name of stdin... "
 stdincheck
@@ -628,14 +662,14 @@ string preprocessor = "$preprocessor";
 bool need_Eflag = $eflag;
 
 string qbe = "$qbe";
-EOF
-
-cat << EOF >> config.d
 
 string assembler = "$assembler";
 bool need_cflag = $cflag;
 
 string linker = "$linker";
+
+string ar = "$ar";
+string ranlib = "$ranlib";
 
 int cpu = arch.$arch;
 int os = system.$os;
@@ -646,7 +680,7 @@ string real_stdin = "$stdin";
 string real_stdout = "$stdout";
 string real_stderr = "$stderr";
 
-string init_init = "function $.init() {
+string init_init = "export function $.init() {
 @start
 	%.0 =l call \$setlocale(w $lcall, l \$.str.locale)
 	%size =l shl 1, 10
@@ -654,16 +688,16 @@ string init_init = "function $.init() {
 	%stack =l call $.xmalloc(l %size)
 	storel %stack, $.stack
 	ret
-}";
+}\n";
 
-string writestderr_init = "function $.writestderr(l %s) {
+string writestderr_init = "export function $.writestderr(l %s) {
 @start
 	%.stderr =l loadl \$$stderr
 	%.0 =w call \$fwprintf(l %.stderr, l \$.str.wfmts, ..., l %s)
 	ret
 }\n";
 
-string key_init = "function \$key() {
+string key_init = "export function \$key() {
 @start
 	%old =l alloc8 $termios
 	%new =l alloc8 $termios

@@ -30,6 +30,7 @@ struct Dictionary {
 
 struct Flags {
     bool Eflag, Qflag, Sflag, cflag, tflag, vflag;
+    int Oflag;
 }
 
 enum word_type {
@@ -71,6 +72,7 @@ class Forth {
     this(string s, Dictionary[] dict) {
         auto i = lastIndexOf(s, '/') + 1;
         this.av = s[i .. $];
+        this.flags.Oflag = 0;
         foreach (d; dict) {
             d.code ~= "\n";
             this.dictionary ~= d;
@@ -81,6 +83,23 @@ class Forth {
 
     void set_Eflag() {
         this.flags.Eflag = true;
+    }
+
+    void set_Oflag(string flag) {
+        switch (flag) {
+        case "-O0":
+            this.flags.Oflag = 0;
+            break;
+        case "-O":
+        case "-O1":
+            this.flags.Oflag = 1;
+            break;
+        case "-O2":
+            this.flags.Oflag = 2;
+            break;
+        default:
+            this.flags.Oflag = 2;
+        }
     }
 
     void set_Qflag() {
@@ -105,6 +124,10 @@ class Forth {
 
     bool Eflag() {
         return this.flags.Eflag;
+    }
+
+    int Oflag() {
+        return this.flags.Oflag;
     }
 
     bool Qflag() {
@@ -981,18 +1004,18 @@ int main(string[] args) {
     Forth forth = new Forth(args[0], dict);
 
     // Some globals that we need.
-    forth.global("data $.stack = align 8 { z 8 }\n");
-    forth.global("data $.sp = align 8 { z 8 }\n");
-    forth.global("data $.sz = align 8 { z 8 }\n\n");
-    forth.global("data $.str.wfmtc = align 4 { w 37, w 108, w 99, w 0 }\n"); // "%lc"
-    forth.global("data $.str.wfmtd = align 4 { w 37, w 108, w 108, w 100, w 32, w 0 }\n"); // "%lld "
-    forth.global("data $.str.wfmts = align 4 { w 37, w 108, w 115, w 0 }\n"); // "%ls"
-    forth.global("data $.str.wnewline = align 4 { w 10, w 0 }\n"); // "\n"
+    forth.global("export data $.stack = align 8 { z 8 }\n");
+    forth.global("export data $.sp = align 8 { z 8 }\n");
+    forth.global("export data $.sz = align 8 { z 8 }\n\n");
+    forth.global("export data $.str.wfmtc = align 4 { w 37, w 108, w 99, w 0 }\n"); // "%lc"
+    forth.global("export data $.str.wfmtd = align 4 { w 37, w 108, w 108, w 100, w 32, w 0 }\n"); // "%lld "
+    forth.global("export data $.str.wfmts = align 4 { w 37, w 108, w 115, w 0 }\n"); // "%ls"
+    forth.global("export data $.str.wnewline = align 4 { w 10, w 0 }\n"); // "\n"
     // "Stack underflow"
-    forth.global("data $.str.underflow = align 4 { w 83, w 116, w 97, w 99, w 107, w 32, w 117, w 110, w 100, w 101, w 114, w 102, w 108, w 111, w 119, w 0 }\n");
+    forth.global("export data $.str.underflow = align 4 { w 83, w 116, w 97, w 99, w 107, w 32, w 117, w 110, w 100, w 101, w 114, w 102, w 108, w 111, w 119, w 0 }\n");
     // "malloc failed"
-    forth.global("data $.str.xmalloc = align 4 { w 109, w 97, w 108, w 108, w 111, w 99, w 32, w 102, w 97, w 105, w 108, w 101, w 100, w 0 }\n");
-    forth.global("data $.str.locale = align 1 { b \"\", b 0 }\n");
+    forth.global("export data $.str.xmalloc = align 4 { w 109, w 97, w 108, w 108, w 111, w 99, w 32, w 102, w 97, w 105, w 108, w 101, w 100, w 0 }\n");
+    forth.global("export data $.str.locale = align 1 { b \"\", b 0 }");
 
     bool first_arg = true, set_output, set_target;
     string target = default_target;
@@ -1042,7 +1065,15 @@ int main(string[] args) {
                 forth.set_Eflag();
                 break;
             case "-O":
-                // We always run the optimization pass
+                /+
+                 + -O0 = disable optimizations
+                 + -O1 = turn on peephole optimizer
+                 + -O2 = also turn on optimized assembly routines
+                 +
+                 + -O == -O1
+                 + -O<anything else> == -O2
+                 +/
+                forth.set_Oflag(arg);
                 break;
             case "-Q":
                 forth.set_Qflag();
@@ -1352,6 +1383,8 @@ string[] create_linker_invocation(Forth forth) {
 }
 
 bool O(Forth forth, string base) {
+    import config;
+
     string[3] peephole;
     string output;
     uint i;
@@ -1370,10 +1403,10 @@ bool O(Forth forth, string base) {
         while (counter < 3) {
             peephole[counter] = lines[i++];
             ++counter;
-            continue;
         }
 
-        if (ffunction_sections(peephole[0])) {
+        /+ This only runs at -O2.  +/
+        if (ffunction_sections(forth, peephole[0])) {
             output ~= peephole[0] ~ "\n";
             output ~= ".section .text.";
             if (peephole[1].startsWith(".globl ")) {
@@ -1390,7 +1423,7 @@ bool O(Forth forth, string base) {
                 counter -= 2;
             }
         } else {
-            output ~= one(peephole[0]) ~ "\n";
+            output ~= one(forth, peephole[0]) ~ "\n";
             peephole[0] = peephole[1];
             peephole[1] = peephole[2];
             --counter;
@@ -1398,11 +1431,15 @@ bool O(Forth forth, string base) {
     }
 
     while (counter > 0) {
-        output ~= one(peephole[0]) ~ "\n";
+        output ~= one(forth, peephole[0]) ~ "\n";
         peephole[0] = peephole[1];
         peephole[1] = peephole[2];
         --counter;
     }
+
+    // This allows -dead_strip to work.
+    if (os == system.darwin)
+        output ~= ".subsections_via_symbols\n";
 
     if (forth.Sflag && !forth.outfile.empty)
         std.file.write(forth.outfile, output);
@@ -1412,8 +1449,11 @@ bool O(Forth forth, string base) {
     return true;
 }
 
-bool ffunction_sections(string line) {
+bool ffunction_sections(Forth forth, string line) {
     import config;
+
+    if (forth.Oflag != 2)
+        return false;
 
     /+
      + Implement -ffunction-sections for qbe on ELF platforms
@@ -1427,12 +1467,15 @@ bool ffunction_sections(string line) {
     return false;
 }
 
-string one(string line) {
+string one(Forth forth, string line) {
     import config;
 
     string s;
 
-    // macOS and linux need a fixup pass for stdin, stdout, and stderr
+    /+
+     + macOS and linux need a fixup pass for stdin, stdout, and stderr
+     + This must always run.
+     +/
     if (os == system.darwin || os == system.linux) {
         s = fixup(line, real_stdin);
         if (s != line)
@@ -1446,6 +1489,10 @@ string one(string line) {
         if (s != line)
             return s;
     }
+
+    // Only run peephole optimizer at -O1 or higher.
+    if (forth.Oflag == 0)
+        return line;
 
     if (cpu == arch.x64) {
         s = xorl(line);
@@ -1703,7 +1750,7 @@ string xorq(string line) {
  +/
 
 Dictionary addition = Dictionary("+",
-"function $.addition() {
+"export function $.addition() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1713,7 +1760,7 @@ Dictionary addition = Dictionary("+",
 }\n", word_type.func);
 
 Dictionary subtraction = Dictionary("-",
-"function $.subtraction() {
+"export function $.subtraction() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1723,7 +1770,7 @@ Dictionary subtraction = Dictionary("-",
 }\n", word_type.func);
 
 Dictionary multiplication = Dictionary("*",
-"function $.multiplication() {
+"export function $.multiplication() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1733,7 +1780,7 @@ Dictionary multiplication = Dictionary("*",
 }\n", word_type.func);
 
 Dictionary division = Dictionary("/",
-"function $.division() {
+"export function $.division() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1743,7 +1790,7 @@ Dictionary division = Dictionary("/",
 }\n", word_type.func);
 
 Dictionary modulo = Dictionary("mod",
-"function $.modulo() {
+"export function $.modulo() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1753,7 +1800,7 @@ Dictionary modulo = Dictionary("mod",
 }\n", word_type.func);
 
 Dictionary equal = Dictionary("=",
-"function $.equal() {
+"export function $.equal() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1768,7 +1815,7 @@ Dictionary equal = Dictionary("=",
 }\n", word_type.func);
 
 Dictionary notequal = Dictionary("<>",
-"function $.notequal() {
+"export function $.notequal() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1783,7 +1830,7 @@ Dictionary notequal = Dictionary("<>",
 }\n", word_type.func);
 
 Dictionary and = Dictionary("and",
-"function $and() {
+"export function $and() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1793,7 +1840,7 @@ Dictionary and = Dictionary("and",
 }\n", word_type.func);
 
 Dictionary or = Dictionary("or",
-"function $or() {
+"export function $or() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1803,7 +1850,7 @@ Dictionary or = Dictionary("or",
 }\n", word_type.func);
 
 Dictionary invert = Dictionary("invert",
-"function $invert() {
+"export function $invert() {
 @start
 	%a =l call $.pop()
 	%b =l extsw -1
@@ -1813,7 +1860,7 @@ Dictionary invert = Dictionary("invert",
 }\n", word_type.func);
 
 Dictionary xor = Dictionary("xor",
-"function $xor() {
+"export function $xor() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1823,7 +1870,7 @@ Dictionary xor = Dictionary("xor",
 }\n", word_type.func);
 
 Dictionary lessthan = Dictionary("<",
-"function $.lessthan() {
+"export function $.lessthan() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1838,7 +1885,7 @@ Dictionary lessthan = Dictionary("<",
 }\n", word_type.func);
 
 Dictionary greaterthan = Dictionary(">",
-"function $.greaterthan() {
+"export function $.greaterthan() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -1853,7 +1900,7 @@ Dictionary greaterthan = Dictionary(">",
 }\n", word_type.func);
 
 Dictionary dot = Dictionary(".",
-"function $.dot() {
+"export function $.dot() {
 @start
 	%buf =l alloc8 128
 	%n =l call $.pop()
@@ -1863,14 +1910,14 @@ Dictionary dot = Dictionary(".",
 }\n", word_type.func);
 
 Dictionary dotstring = Dictionary(".\"",
-"function $.string(l %s) {
+"export function $.string(l %s) {
 @start
 	%.0 =w call $wprintf(l $.str.wfmts, ..., l %s)
 	ret
 }\n", word_type.func);
 
 Dictionary emit = Dictionary("emit",
-"function $emit() {
+"export function $emit() {
 @start
 	%c =w call $.pop()
 	%.0 =w call $wprintf(l $.str.wfmtc, ..., w %c)
@@ -1878,7 +1925,7 @@ Dictionary emit = Dictionary("emit",
 }\n", word_type.func);
 
 Dictionary destroy = Dictionary(".destroy",
-"function $.destroy() {
+"export function $.destroy() {
 @start
 	%stack =l loadl $.stack
 	%sz =l loadl $.sz
@@ -1891,7 +1938,7 @@ Dictionary destroy = Dictionary(".destroy",
 }\n", word_type.func);
 
 Dictionary fatal = Dictionary(".fatal",
-"function $.fatal(l %s) {
+"export function $.fatal(l %s) {
 @start
 	call $.writestderr(l %s)
 	call $.writestderr(l $.str.wnewline)
@@ -1901,7 +1948,7 @@ Dictionary fatal = Dictionary(".fatal",
 }\n", word_type.func);
 
 Dictionary pop = Dictionary(".pop",
-"function l $.pop() {
+"export function l $.pop() {
 @start
 	%sp =l loadl $.sp
 	%cmp =l ceql %sp, 0
@@ -1919,7 +1966,7 @@ Dictionary pop = Dictionary(".pop",
 }\n", word_type.func);
 
 Dictionary resize = Dictionary(".resize",
-"function $.resize(l %sz) {
+"export function $.resize(l %sz) {
 @start
 	%newsz =l shl %sz, 1
 	storel %newsz, $.sz
@@ -1932,7 +1979,7 @@ Dictionary resize = Dictionary(".resize",
 }\n", word_type.func);
 
 Dictionary push = Dictionary(".push",
-"function $.push(l %num) {
+"export function $.push(l %num) {
 @start
 	%sp =l loadl $.sp
 	%sz =l loadl $.sz
@@ -1951,7 +1998,7 @@ Dictionary push = Dictionary(".push",
 }\n", word_type.func);
 
 Dictionary xmalloc = Dictionary(".xmalloc",
-"function l $.xmalloc(l %num) {
+"export function l $.xmalloc(l %num) {
 @start
 	%.0 =l ceql %num, 0
 	jnz %.0, @error, @valid
@@ -1968,21 +2015,21 @@ Dictionary xmalloc = Dictionary(".xmalloc",
 }\n", word_type.func);
 
 Dictionary cr = Dictionary("cr",
-"function $cr() {
+"export function $cr() {
 @start
 	call $wprintf(l $.str.wnewline, ...)
 	ret
 }\n", word_type.func);
 
 Dictionary drop = Dictionary("drop",
-"function $drop() {
+"export function $drop() {
 @start
 	%.0 =l call $.pop()
 	ret
 }\n", word_type.func);
 
 Dictionary dup = Dictionary("dup",
-"function $dup() {
+"export function $dup() {
 @start
 	%a =l call $.pop()
 	call $.push(l %a)
@@ -1991,7 +2038,7 @@ Dictionary dup = Dictionary("dup",
 }\n", word_type.func);
 
 Dictionary over = Dictionary("over",
-"function $over() {
+"export function $over() {
 @start
         %b =l call $.pop()
         %a =l call $.pop()
@@ -2002,7 +2049,7 @@ Dictionary over = Dictionary("over",
 }\n", word_type.func);
 
 Dictionary rot = Dictionary("rot",
-"function $rot() {
+"export function $rot() {
 @start
 	%c =l call $.pop()
 	%b =l call $.pop()
@@ -2014,7 +2061,7 @@ Dictionary rot = Dictionary("rot",
 }\n", word_type.func);
 
 Dictionary swap = Dictionary("swap",
-"function $swap() {
+"export function $swap() {
 @start
 	%b =l call $.pop()
 	%a =l call $.pop()
@@ -2024,7 +2071,7 @@ Dictionary swap = Dictionary("swap",
 }\n", word_type.func);
 
 Dictionary bang = Dictionary(".bang",
-"function $.bang() {
+"export function $.bang() {
 @start
 	%.location =l call $.pop()
 	%.value =l call $.pop()
@@ -2033,7 +2080,7 @@ Dictionary bang = Dictionary(".bang",
 }\n", word_type.func);
 
 Dictionary at = Dictionary(".at",
-"function $.at() {
+"export function $.at() {
 @start
 	%.location =l call $.pop()
 	%.value =l loadl %.location
@@ -2042,14 +2089,14 @@ Dictionary at = Dictionary(".at",
 }\n", word_type.func);
 
 Dictionary question = Dictionary("?",
-"function $.question() {
+"export function $.question() {
 @start
 	call $.at()
 	call $.dot()
 }\n", word_type.func);
 
 Dictionary addbang = Dictionary("+!",
-"function $.addbang() {
+"export function $.addbang() {
 @start
 	%.location =l call $.pop()
 	%.0 =l call $.pop()
