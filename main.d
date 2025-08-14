@@ -31,6 +31,7 @@ struct Dictionary {
 struct Flags {
     bool Eflag, Qflag, Sflag, cflag, tflag, vflag;
     int Oflag;
+    bool genlib;
 }
 
 enum word_type {
@@ -61,24 +62,29 @@ class Forth {
     private Dictionary[] dictionary;
     private Flags flags;
     private Block[] blocks;
-    private string[] globals, input_list;
+    private string[] globals, input_list, user_globals;
     private string av, current_file, current_function;
     private ulong blockno, depth, lineno, strno;
     private int p;
     private bool error, next_is_name;
-    string outfile;
+    string last_data, last_func, outfile;
     bool in_func;
 
     this(string s, Dictionary[] dict) {
         auto i = lastIndexOf(s, '/') + 1;
         this.av = s[i .. $];
         this.flags.Oflag = 0;
+        this.last_func = ".sentinel";
         foreach (d; dict) {
             d.code ~= "\n";
             this.dictionary ~= d;
         }
         this.blocks ~= Block(0, block_type.sentinel, false);
         ++this.blockno;
+    }
+
+    void set_genlib() {
+        this.flags.genlib = true;
     }
 
     void set_Eflag() {
@@ -122,6 +128,10 @@ class Forth {
         this.flags.vflag = true;
     }
 
+    bool genlib() {
+        return this.flags.genlib;
+    }
+
     bool Eflag() {
         return this.flags.Eflag;
     }
@@ -154,21 +164,40 @@ class Forth {
         this.globals ~= s;
     }
 
+    void user_global(string s) {
+        this.user_globals ~= s;
+    }
+
     void write_code(string fn) {
         string s;
+        bool print;
+
+        if (this.flags.genlib)
+            print = true;
 
         foreach (d; this.dictionary) {
             if (d.type == word_type.func) {
-                if (d.code != "\n")
-                    s ~= d.code;
+                if (d.name == this.last_func) {
+                    print = true;
+                    continue;
+                }
+
+                if (print) {
+                    if (d.code != "\n")
+                        s ~= d.code;
+                }
             } else {
                 s ~= "export data $" ~ d.name ~ " = align 8 { z 8 }\n";
             }
         }
 
-        foreach (g; this.globals)
-            s ~= g;
-        s ~= "\n";
+        if (this.flags.genlib) {
+            foreach (g; this.globals)
+                s ~= g;
+        }
+
+        foreach (ug; this.user_globals)
+            s ~= ug;
 
         std.file.write(fn, s);
     }
@@ -765,7 +794,7 @@ bool compile(Forth forth, string line) {
                 uint c = to!uint(dstr[i]);
                 str ~= ("w " ~ to!string(c) ~ ", ");
             }
-            forth.global("\nexport data $_.L.str" ~ strno ~ " = align 4 { " ~ str ~ "w 0 }");
+            forth.user_global("\nexport data $_.L.str" ~ strno ~ " = align 4 { " ~ str ~ "w 0 }");
             forth.cg("\tcall $.string(l $_.L.str" ~ strno ~ ")");
             forth.inc_strno;
             is_string = false;
@@ -848,9 +877,7 @@ bool compile(Forth forth, string line) {
             is_hash = true;
             break;
         case "!":
-            forth.cg("\t%.location =l call $.pop()");
-            forth.cg("\t%.value =l call $.pop()");
-            forth.cg("\tstorel %.value, %.location");
+            forth.cg("\tcall $.bang()");
             break;
         case "@":
             forth.cg("\tcall $.at()");
@@ -1000,6 +1027,8 @@ int main(string[] args) {
     dict ~= init;
     dict ~= writestderr;
     dict ~= resize;
+    // sentinel must be last
+    dict ~= sentinel;
 
     Forth forth = new Forth(args[0], dict);
 
@@ -1015,7 +1044,7 @@ int main(string[] args) {
     forth.global("export data $.str.underflow = align 4 { w 83, w 116, w 97, w 99, w 107, w 32, w 117, w 110, w 100, w 101, w 114, w 102, w 108, w 111, w 119, w 0 }\n");
     // "malloc failed"
     forth.global("export data $.str.xmalloc = align 4 { w 109, w 97, w 108, w 108, w 111, w 99, w 32, w 102, w 97, w 105, w 108, w 101, w 100, w 0 }\n");
-    forth.global("export data $.str.locale = align 1 { b \"\", b 0 }");
+    forth.global("export data $.str.locale = align 1 { b \"\", b 0 }\n");
 
     bool first_arg = true, set_output, set_target;
     string target = default_target;
@@ -1094,6 +1123,9 @@ int main(string[] args) {
             case "-v":
                 forth.set_vflag();
                 break;
+            case "-gen_lib":
+                forth.set_genlib();
+                break;
             default:
                 stderr.writeln(forth.argv0 ~ ": warning: unknown option: " ~ arg);
             }
@@ -1136,6 +1168,9 @@ int main(string[] args) {
         string[] pp;
         pp ~= preprocessor;
         pp ~= "-C";
+        pp ~= "-nostdinc";
+        pp ~= "-isystem";
+        pp ~= incdir;
         if (need_Eflag) {
             pp ~= "-E";
             pp ~= "-x";
@@ -1184,9 +1219,9 @@ int main(string[] args) {
 
         if (forth.vflag) {
             if (forth.Qflag && !forth.outfile.empty)
-                stderr.writeln(forth.argv0 ~ " -o " ~ forth.outfile ~ " " ~ (base ~ ".i"));
+                stderr.writeln("forth1 -o " ~ forth.outfile ~ " " ~ (base ~ ".i"));
             else
-                stderr.writeln(forth.argv0 ~ " -o " ~ (base ~ ".ssa") ~ " " ~ (base ~ ".i"));
+                stderr.writeln("forth1 -o " ~ (base ~ ".ssa") ~ " " ~ (base ~ ".i"));
         }
 
         forth.set_pass(pass.collect);
@@ -1298,6 +1333,60 @@ int main(string[] args) {
                 continue;
             }
 
+            if (forth.genlib) {
+                string[] ar_cmd;
+                ar_cmd ~= ar;
+                ar_cmd ~= "cru";
+                ar_cmd ~= "lib4q.a";
+                ar_cmd ~= (base ~ ".o");
+
+                string[] ranlib_cmd;
+                ranlib_cmd ~= ranlib;
+                ranlib_cmd ~= "lib4q.a";
+
+                if (forth.vflag) {
+                    bool first_s = true;
+                    foreach (s; ar_cmd) {
+                        if (first_s) {
+                            first_s = false;
+                            stderr.writeln(s);
+                            continue;
+                        }
+                        stderr.write(" " ~ s);
+                    }
+                    stderr.writeln;
+                }
+
+                if (spawnProcess(ar_cmd).wait != 0) {
+                    forth.fatal("ar failed");
+                    remove_all(forth, base, rm.all);
+                    return 1;
+                }
+
+                if (forth.vflag) {
+                    bool first_s = true;
+                    foreach (s; ranlib_cmd) {
+                        if (first_s) {
+                            first_s = false;
+                            stderr.writeln(s);
+                            continue;
+                        }
+                        stderr.write(" " ~ s);
+                    }
+                    stderr.writeln;
+                }
+
+                if (spawnProcess(ranlib_cmd).wait != 0) {
+                    forth.fatal("ranlib failed");
+                    remove_all(forth, base, rm.all);
+                    return 1;
+                }
+
+                remove_all(forth, base, rm.all);
+
+                return 0;
+            }
+
             if (forth.vflag) {
                 bool first_s = true;
                 foreach (s; ld) {
@@ -1351,6 +1440,7 @@ string[] create_linker_invocation(Forth forth) {
         ld ~= ld_args[15];
         foreach (input; forth.inputs)
             ld ~= (create_base(input) ~ ".o");
+        ld ~= stdlibpath;
         ld ~= ld_args[16];
         ld ~= ld_args[17];
         break;
@@ -1363,6 +1453,7 @@ string[] create_linker_invocation(Forth forth) {
             ld ~= ld_args[i];
         foreach (input; forth.inputs)
             ld ~= (create_base(input) ~ ".o");
+        ld ~= stdlibpath;
         for (int i = 18; i < 23; ++i)
             ld ~= ld_args[i];
         break;
@@ -1375,6 +1466,7 @@ string[] create_linker_invocation(Forth forth) {
             ld ~= ld_args[i];
         foreach (input; forth.inputs)
             ld ~= (create_base(input) ~ ".o");
+        ld ~= stdlibpath;
         for (int i = 10; i < 15; ++i)
             ld ~= ld_args[i];
     }
@@ -1909,6 +2001,11 @@ Dictionary dot = Dictionary(".",
 	ret
 }\n", word_type.func);
 
+Dictionary print_wide = Dictionary(".print_wide",
+"export function $.print_wide(l %fmt, ...) {
+@start
+}\n", word_type.func);
+
 Dictionary dotstring = Dictionary(".\"",
 "export function $.string(l %s) {
 @start
@@ -2105,3 +2202,5 @@ Dictionary addbang = Dictionary("+!",
 	storel %.value, %.location
 	ret
 }\n", word_type.func);
+
+Dictionary sentinel = Dictionary(".sentinel", "\n", word_type.func);

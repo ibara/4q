@@ -11,9 +11,14 @@ DMD =		$dmd
 DFLAGS =	$dflags
 
 BINDIR =	$bindir
+INCDIR =	$incdir
+LIBDIR =	$libdir
 MANDIR =	$mandir
 
 PROG =	4q
+LIB =	lib\${PROG}.a
+
+STDINC =	stdinc.4th
 
 all:
 EOF
@@ -28,18 +33,25 @@ EOF
 fi
 
 cat << EOF >> Makefile
+	touch lib\${PROG}.4th
+	./\${PROG} -gen_lib lib\${PROG}.4th
+	rm -f lib\${PROG}.4th
 
 install:
 	install -d \${DESTDIR}\${BINDIR}
+	install -d \${DESTDIR}\${INCDIR}
+	install -d \${DESTDIR}\${LIBDIR}
 	install -d \${DESTDIR}\${MANDIR}/man1
 	install -c -s -m 755 \${PROG} \${DESTDIR}\${BINDIR}
+	install -c -m 444 \${STDINC} \${DESTDIR}\${INCDIR}
+	install -c -s -m 444 \${LIB} \${DESTDIR}\${LIBDIR}
 	install -c -m 444 \${PROG}.1 \${DESTDIR}\${MANDIR}/man1
 
 test:
 	@echo "No tests"
 
 clean:
-	rm -f \${PROG} \${PROG}.o
+	rm -f \${PROG} \${PROG}.o \${LIB}
 
 distclean: clean
 	rm -f Makefile config.d \${PROG}.core
@@ -365,8 +377,12 @@ else
 fi
 
 bindirset=0
+incdirset=0
+libdirset=0
 mandirset=0
 bindir="$prefix/bin"
+incdir="$prefix/include/4q"
+libdir="$prefix/lib"
 mandir="$prefix/share/man"
 
 lto=0
@@ -380,6 +396,12 @@ do
       if [ $bindirset -eq 0 ] ; then
         bindir="$prefix/bin"
       fi
+      if [ $incdirset -eq 0 ] ; then
+        incdir="$prefix/include/4q"
+      fi
+      if [ $libdirset -eq 0 ] ; then
+        libdir="$prefix/lib"
+      fi
       if [ $mandirset -eq 0 ] ; then
         mandir="$prefix/share/man"
       fi
@@ -387,6 +409,14 @@ do
     --bindir=*)
       bindir=${opt#*=}
       bindirset=1
+      ;;
+    --incdir=*)
+      incdir=${opt#*=}
+      incdirset=1
+      ;;
+    --libdir=*)
+      libdir=${opt#*=}
+      libdirset=1
       ;;
     --mandir=*)
       mandir=${opt#*=}
@@ -423,6 +453,10 @@ do
       echo "Top level install directory is PREFIX [$prefix]"
       printf "  --bindir=BINDIR         "
       echo "Install executable to BINDIR [$bindir]"
+      printf "  --incdir=INCDIR         "
+      echo "Install headers to INCDIR [$incdir]"
+      printf "  --libdir=LIBDIR         "
+      echo "Install executable to LIBDIR [$libdir]"
       printf "  --mandir=MANDIR         "
       echo "Install manual pages to MANDIR [$mandir]"
       printf "  --dmd=DMD               "
@@ -656,6 +690,8 @@ fi
 
 cat << EOF >> config.d
 
+string incdir = "$incdir";
+
 string default_target = "$target";
 
 string preprocessor = "$preprocessor";
@@ -667,6 +703,7 @@ string assembler = "$assembler";
 bool need_cflag = $cflag;
 
 string linker = "$linker";
+string stdlibpath = "$libdir/lib4q.a";
 
 string ar = "$ar";
 string ranlib = "$ranlib";

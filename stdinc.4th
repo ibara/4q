@@ -1,5 +1,5 @@
-#ifndef _STDLIB_4TH_
-#define _STDLIB_4TH_
+#ifndef _STDINC_4TH_
+#define _STDINC_4TH_
 
 ( Arithmetic functions )
 : dec 1 - ;
