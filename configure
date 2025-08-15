@@ -33,9 +33,9 @@ EOF
 fi
 
 cat << EOF >> Makefile
-	touch lib\${PROG}.4th
+	@touch lib\${PROG}.4th
 	./\${PROG} -O2 -gen_lib lib\${PROG}.4th
-	rm -f lib\${PROG}.4th
+	@rm -f lib\${PROG}.4th
 
 install:
 	install -d \${DESTDIR}\${BINDIR}

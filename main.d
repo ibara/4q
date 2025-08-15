@@ -213,9 +213,6 @@ class Forth {
         if (cpu != arch.x64)
             return d.code;
 
-        if (os == system.darwin)
-            return d.code;
-
         switch (d.name) {
         case ".push":
         case ".pop":
